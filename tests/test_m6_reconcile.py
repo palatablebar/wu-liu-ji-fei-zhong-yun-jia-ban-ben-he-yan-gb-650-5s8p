@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from fixtures.expected import AMOUNT_TOTAL, PARTS, ROWS_IN, ROWS_OK, ROWS_QUARANTINED, VOLUMETRIC_HITS
+from fixtures.expected import (
+    AMOUNT_TOTAL,
+    PARTS,
+    PIECE_ACTUAL,
+    PIECE_VOLUMETRIC,
+    PIECES_BILLED,
+    ROWS_IN,
+    ROWS_OK,
+    ROWS_QUARANTINED,
+    SHIPMENTS,
+)
 
 from app.modules.m6_reconcile import compare, explain, totals
 from app.modules.m6_reconcile import service as reconcile
@@ -43,16 +53,18 @@ def test_amount_account_parts(pipeline):
 
 def test_version_account_single_pick(pipeline):
     account = _accounts(pipeline["run_id"])["version"]
-    assert account["left_value"] == ROWS_OK
-    assert account["parts"] == [{"label": "单选命中", "value": ROWS_OK}]
+    assert account["left_value"] == SHIPMENTS
+    assert account["parts"] == [{"label": "单选命中", "value": SHIPMENTS}]
     assert account["balanced"] is True
 
 
 def test_weight_account_splits_by_source(pipeline):
+    """计费重账按件：16 个计费件 = 7 件实重择用 + 9 件体积重择用。"""
     account = _accounts(pipeline["run_id"])["weight"]
+    assert account["left_value"] == PIECES_BILLED
     parts = {part["label"]: part["value"] for part in account["parts"]}
-    assert parts["体积重择用"] == VOLUMETRIC_HITS
-    assert parts["实重择用"] == ROWS_OK - VOLUMETRIC_HITS
+    assert parts["体积重择用"] == PIECE_VOLUMETRIC
+    assert parts["实重择用"] == PIECE_ACTUAL
     assert account["balanced"] is True
 
 

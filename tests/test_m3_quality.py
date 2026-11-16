@@ -21,16 +21,35 @@ def test_sentinel_rows_quarantined(pipeline):
     assert "WB-1008" not in billed
 
 
-def test_duplicate_conflict_keeps_first(pipeline):
-    """TRAP-14：重复运单取值冲突时保留首条，首条重量是 3.200 kg。"""
-    rows = {row["waybill_no"]: row for row in waybills.rows_for(pipeline["run_id"])}
-    assert rows["WB-1001"]["weight_kg"] == "3.200"
+def test_multi_piece_waybill_keeps_every_piece(pipeline):
+    """多件运单：同一票的两行都保留，逐件编件号并标 MULTI_PIECE。"""
+    rows = [row for row in waybills.rows_for(pipeline["run_id"]) if row["waybill_no"] == "WB-1001"]
+    assert len(rows) == 2
+    assert [row["piece_seq"] for row in rows] == [1, 2]
+    assert [row["weight_kg"] for row in rows] == ["3.200", "3.500"]
+    assert all("MULTI_PIECE" in row["codes"] for row in rows)
     codes = [item["code"] for item in quality.rows(pipeline["run_id"])]
-    assert codes.count("DUP_CONFLICT") == 1
+    assert "DUP_CONFLICT" not in codes
+    assert "DUPLICATE_WAYBILL" not in codes
+
+
+def test_conflicting_shipment_header_keeps_first():
+    """票级字段（分区）冲突的两行并不成一票：保留首条，后条记 DUP_CONFLICT。"""
+    raw = samples.csv_bytes([
+        samples.row("WB-9302", weight="1", pieces="2"),
+        samples.row("WB-9302", weight="2", zone="Z2", pieces="2"),
+    ])
+    ingest = waybills.import_bytes(raw, "dup_conflict.csv")
+    assert ingest["rows_ok"] == 1
+    assert ingest["rows_quarantined"] == 1
+    rows = waybills.rows_for(ingest["run_id"])
+    assert [row["zone"] for row in rows] == ["Z1"]
+    codes = [item["code"] for item in store.quarantine(ingest["run_id"])]
+    assert "DUP_CONFLICT" in codes
 
 
 def test_identical_duplicate_marked_separately():
-    """取值一致的重复运单记 DUPLICATE_WAYBILL，与冲突区分开。"""
+    """逐件测量也完全一致的重复行记 DUPLICATE_WAYBILL，与多件、冲突区分开。"""
     raw = samples.csv_bytes([samples.row("WB-9301"), samples.row("WB-9301")])
     ingest = waybills.import_bytes(raw, "dup_same.csv")
     assert ingest["rows_ok"] == 1
@@ -70,7 +89,7 @@ def test_metrics_rows_and_pass_rate(pipeline):
     assert metrics["rows_in"] == ROWS_IN
     assert metrics["rows_ok"] == ROWS_OK
     assert metrics["quarantined_lines"] == ROWS_QUARANTINED
-    assert metrics["pass_rate"] == "55.6"
+    assert metrics["pass_rate"] == "59.3"
 
 
 def test_quality_score_bounded(pipeline):

@@ -11,7 +11,8 @@ def reconcile(run_id: str) -> dict:
     quarantine_rows = store.quarantine(run_id)
     weight_rows = store.weight_lines(run_id)
     charge_rows = store.charge_lines(run_id)
-    accounts = compare.accounts(run, quarantine_rows, weight_rows, charge_rows)
+    piece_rows = store.piece_lines(run_id)
+    accounts = compare.accounts(run, quarantine_rows, weight_rows, charge_rows, piece_rows)
     explain.annotated(accounts)
     return {
         "run_id": run_id,

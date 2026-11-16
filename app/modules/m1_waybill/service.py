@@ -82,6 +82,7 @@ def _draft(record: reader.Record, header: list[str], styles: set[str]) -> dict:
         "line_no": record.line_no,
         "raw": record.raw,
         "waybill_no": waybill_no,
+        "piece_seq": 1,
         "carrier": carrier,
         "service": service,
         "zone": zone,
@@ -146,6 +147,7 @@ def import_bytes(raw: bytes, name: str) -> dict:
         good.append({
             "line_no": draft["line_no"],
             "waybill_no": draft["waybill_no"],
+            "piece_seq": draft["piece_seq"],
             "carrier": draft["carrier"],
             "service": draft["service"],
             "zone": draft["zone"],
@@ -160,6 +162,9 @@ def import_bytes(raw: bytes, name: str) -> dict:
         })
 
     quarantined_lines = len({item["line_no"] for item in bad})
+    shipment_sizes: dict[str, int] = {}
+    for item in good:
+        shipment_sizes[item["waybill_no"]] = shipment_sizes.get(item["waybill_no"], 0) + 1
     notes = manifest.dumps({
         "file_codes": sort_codes(sheet.codes),
         "segments": sheet.segments,
@@ -167,6 +172,8 @@ def import_bytes(raw: bytes, name: str) -> dict:
         "empty_rows": sheet.empty_rows,
         "state": sheet.state,
         "tz_styles": sorted(styles),
+        "shipments": len(shipment_sizes),
+        "multi_piece_shipments": sum(1 for size in shipment_sizes.values() if size > 1),
     })
 
     store.replace_waybills(run_id, good)

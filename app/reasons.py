@@ -27,6 +27,7 @@ REASONS: dict[str, dict[str, str]] = {
     "RATE_STALE": {"label": "运价集版本陈旧", "level": BLOCK},
     "DUP_CONFLICT": {"label": "重复运单取值冲突", "level": BLOCK},
     "DUPLICATE_WAYBILL": {"label": "重复运单取值一致", "level": BLOCK},
+    "MULTI_PIECE": {"label": "多件运单逐件计费", "level": INFO},
     "MIN_CHARGE_APPLIED": {"label": "最低收费兜底", "level": INFO},
     "VOLUMETRIC_APPLIED": {"label": "体积重大于实重", "level": INFO},
     "ZONE_REMOTE": {"label": "偏远分区附加", "level": INFO},

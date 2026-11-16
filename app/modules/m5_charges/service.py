@@ -1,4 +1,7 @@
-"""M5 编排：按运单组合分区价与附加费，落库账单行并回写运行合计。"""
+"""M5 编排：按运单组合分区价与附加费，落库账单行并回写运行合计。
+
+首重与续重都按整票计费重（M4 逐件取大累加后整票进位）计一次，多件不会重复收首重。
+"""
 
 from __future__ import annotations
 
@@ -20,7 +23,10 @@ def compute_charges(run_id: str) -> dict:
     weights = store.weight_lines(run_id)
     if not weights:
         raise DomainError("NO_WEIGHTS", "该运行还没有计费重", 409)
-    waybills = {row["waybill_no"]: row for row in store.waybills(run_id)}
+    # 票级字段同一票各件一致，取任一件（行号最小者）即可
+    waybills: dict[str, dict] = {}
+    for row in store.waybills(run_id):
+        waybills.setdefault(row["waybill_no"], row)
     index_map = rates.index()
 
     lines: list[dict] = []
@@ -52,7 +58,7 @@ def compute_charges(run_id: str) -> dict:
             row_codes.append("MIN_CHARGE_APPLIED")
         if remote > 0:
             row_codes.append("ZONE_REMOTE")
-        if weight["source"] == billable.VOLUMETRIC:
+        if "VOLUMETRIC_APPLIED" in (weight["codes"] or "").split(","):
             row_codes.append("VOLUMETRIC_APPLIED")
 
         lines.append({

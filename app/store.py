@@ -1,6 +1,7 @@
-"""SQLite 存取：运行清单、运价版本、运单、隔离区、计费重行、账单行。
+"""SQLite 存取：运行清单、运价版本、运单（逐件）、隔离区、逐件计费重、计费重行、账单行。
 
 只放数据访问，不放业务规则。每次调用开一个连接，用完即关。
+表结构随 SCHEMA_VERSION 演进：版本不一致时整库重建，运行数据由输入重放即可恢复。
 """
 
 from __future__ import annotations
@@ -10,7 +11,18 @@ from contextlib import contextmanager
 
 from app import config
 
+SCHEMA_VERSION = "2"
+
+TABLES = (
+    "runs", "rate_sets", "rate_cards", "waybills", "quarantine",
+    "piece_lines", "weight_lines", "charge_lines",
+)
+
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS runs (
   run_id TEXT PRIMARY KEY,
   input_name TEXT NOT NULL DEFAULT '',
@@ -56,6 +68,7 @@ CREATE TABLE IF NOT EXISTS waybills (
   run_id TEXT NOT NULL,
   line_no INTEGER NOT NULL,
   waybill_no TEXT NOT NULL,
+  piece_seq INTEGER NOT NULL DEFAULT 1,
   carrier TEXT NOT NULL,
   service TEXT NOT NULL,
   zone TEXT NOT NULL,
@@ -67,7 +80,7 @@ CREATE TABLE IF NOT EXISTS waybills (
   declared_value TEXT NOT NULL,
   pieces INTEGER NOT NULL,
   codes TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY (run_id, waybill_no)
+  PRIMARY KEY (run_id, line_no)
 );
 CREATE TABLE IF NOT EXISTS quarantine (
   run_id TEXT NOT NULL,
@@ -78,12 +91,26 @@ CREATE TABLE IF NOT EXISTS quarantine (
   raw TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (run_id, line_no, code)
 );
+CREATE TABLE IF NOT EXISTS piece_lines (
+  run_id TEXT NOT NULL,
+  waybill_no TEXT NOT NULL,
+  piece_seq INTEGER NOT NULL,
+  line_no INTEGER NOT NULL,
+  actual_kg TEXT NOT NULL DEFAULT '0.000',
+  volumetric_kg TEXT NOT NULL DEFAULT '0.000',
+  source TEXT NOT NULL DEFAULT '',
+  chargeable_kg TEXT NOT NULL DEFAULT '0.000',
+  codes TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (run_id, waybill_no, piece_seq)
+);
 CREATE TABLE IF NOT EXISTS weight_lines (
   run_id TEXT NOT NULL,
   waybill_no TEXT NOT NULL,
   version_id TEXT NOT NULL DEFAULT '',
+  pieces INTEGER NOT NULL DEFAULT 1,
   actual_kg TEXT NOT NULL DEFAULT '0.000',
   volumetric_kg TEXT NOT NULL DEFAULT '0.000',
+  chargeable_kg TEXT NOT NULL DEFAULT '0.000',
   source TEXT NOT NULL DEFAULT '',
   billable_kg TEXT NOT NULL DEFAULT '0.000',
   steps INTEGER NOT NULL DEFAULT 0,
@@ -126,8 +153,22 @@ def session():
 
 
 def init_db() -> None:
+    """建表；schema 版本不一致时整库重建（运行数据由输入重放恢复）。"""
     with session() as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')"
+        )
+        row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+        current = row[0] if row else ""
+        if current != SCHEMA_VERSION:
+            for table in TABLES:
+                conn.execute(f"DROP TABLE IF EXISTS {table}")
         conn.executescript(SCHEMA)
+        if current != SCHEMA_VERSION:
+            conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
+                (SCHEMA_VERSION,),
+            )
 
 
 def rows(sql: str, params: tuple = ()) -> list[dict]:
@@ -248,15 +289,15 @@ def replace_waybills(run_id: str, items: list[dict]) -> None:
     with session() as conn:
         conn.execute("DELETE FROM waybills WHERE run_id = ?", (run_id,))
         conn.executemany(
-            "INSERT INTO waybills (run_id, line_no, waybill_no, carrier, service, zone, "
+            "INSERT INTO waybills (run_id, line_no, waybill_no, piece_seq, carrier, service, zone, "
             "pickup_utc, weight_kg, length_cm, width_cm, height_cm, declared_value, pieces, codes) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
-                    run_id, it["line_no"], it["waybill_no"], it["carrier"], it["service"],
-                    it["zone"], it["pickup_utc"], it["weight_kg"], it["length_cm"],
-                    it["width_cm"], it["height_cm"], it["declared_value"], it["pieces"],
-                    it["codes"],
+                    run_id, it["line_no"], it["waybill_no"], it.get("piece_seq", 1),
+                    it["carrier"], it["service"], it["zone"], it["pickup_utc"],
+                    it["weight_kg"], it["length_cm"], it["width_cm"], it["height_cm"],
+                    it["declared_value"], it["pieces"], it["codes"],
                 )
                 for it in items
             ],
@@ -264,6 +305,7 @@ def replace_waybills(run_id: str, items: list[dict]) -> None:
 
 
 def waybills(run_id: str) -> list[dict]:
+    """逐件行：一件一行，按原始行号排序。"""
     return rows("SELECT * FROM waybills WHERE run_id = ? ORDER BY line_no", (run_id,))
 
 
@@ -286,17 +328,40 @@ def quarantine(run_id: str) -> list[dict]:
     )
 
 
+def replace_piece_lines(run_id: str, items: list[dict]) -> None:
+    with session() as conn:
+        conn.execute("DELETE FROM piece_lines WHERE run_id = ?", (run_id,))
+        conn.executemany(
+            "INSERT INTO piece_lines (run_id, waybill_no, piece_seq, line_no, actual_kg, "
+            "volumetric_kg, source, chargeable_kg, codes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    run_id, it["waybill_no"], it["piece_seq"], it["line_no"], it["actual_kg"],
+                    it["volumetric_kg"], it["source"], it["chargeable_kg"], it.get("codes", ""),
+                )
+                for it in items
+            ],
+        )
+
+
+def piece_lines(run_id: str) -> list[dict]:
+    return rows(
+        "SELECT * FROM piece_lines WHERE run_id = ? ORDER BY line_no, piece_seq", (run_id,)
+    )
+
+
 def replace_weight_lines(run_id: str, items: list[dict]) -> None:
     with session() as conn:
         conn.execute("DELETE FROM weight_lines WHERE run_id = ?", (run_id,))
         conn.executemany(
-            "INSERT INTO weight_lines (run_id, waybill_no, version_id, actual_kg, volumetric_kg, "
-            "source, billable_kg, steps, codes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO weight_lines (run_id, waybill_no, version_id, pieces, actual_kg, "
+            "volumetric_kg, chargeable_kg, source, billable_kg, steps, codes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
-                    run_id, it["waybill_no"], it["version_id"], it["actual_kg"],
-                    it["volumetric_kg"], it["source"], it["billable_kg"], it["steps"],
-                    it.get("codes", ""),
+                    run_id, it["waybill_no"], it["version_id"], it.get("pieces", 1),
+                    it["actual_kg"], it["volumetric_kg"], it.get("chargeable_kg", "0.000"),
+                    it["source"], it["billable_kg"], it["steps"], it.get("codes", ""),
                 )
                 for it in items
             ],

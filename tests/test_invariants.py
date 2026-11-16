@@ -16,17 +16,25 @@ from app.modules.m6_reconcile import service as reconcile
 
 def test_rerun_keeps_rows_and_total(pipeline):
     run_id = pipeline["run_id"]
-    before_rows = len(store.charge_lines(run_id))
-    before_total = (store.get_run(run_id) or {})["amount_total"]
+    before = {
+        "charges": store.charge_lines(run_id),
+        "weights": store.weight_lines(run_id),
+        "pieces": store.piece_lines(run_id),
+        "waybills": store.waybills(run_id),
+        "amount_total": (store.get_run(run_id) or {})["amount_total"],
+    }
 
     again = waybills.import_sample()
     weights.compute_weights(run_id)
     charges.compute_charges(run_id)
-    after_total = (store.get_run(run_id) or {})["amount_total"]
 
     assert again["run_id"] == run_id
-    assert len(store.charge_lines(run_id)) == before_rows
-    assert after_total == before_total
+    assert again["reused"] is True
+    assert store.charge_lines(run_id) == before["charges"]
+    assert store.weight_lines(run_id) == before["weights"]
+    assert store.piece_lines(run_id) == before["pieces"]
+    assert store.waybills(run_id) == before["waybills"]
+    assert (store.get_run(run_id) or {})["amount_total"] == before["amount_total"]
 
 
 def test_conservation_of_parts(pipeline):

@@ -3,7 +3,7 @@
 {% block body %}
 <section class="head">
   <h1>计费重</h1>
-  <p class="meta">计费 {{ summary.billed or 0 }} · 体积重择用 {{ summary.volumetric_hits or 0 }} · 实重择用 {{ summary.actual_hits or 0 }} · 合计 {{ summary.billable_total or "0" }} kg</p>
+  <p class="meta">计费 {{ summary.billed or 0 }} 票 · 体积重择用 {{ summary.volumetric_hits or 0 }} · 实重择用 {{ summary.actual_hits or 0 }} · 混合取大 {{ summary.mixed_hits or 0 }} · 计费件数 {{ summary.pieces or 0 }} · 合计 {{ summary.billable_total or "0" }} kg</p>
 </section>
 
 <div class="rule-line">{{ rule(200) }}</div>
@@ -11,7 +11,7 @@
 <section class="block">
   <form class="cmd" data-post="/api/weights" data-target="#weights-out" data-reload="1">
     <button type="submit" class="btn">计算</button>
-    <span class="dim">台阶 {{ 0.5 }} kg 向上</span>
+    <span class="dim">逐件取大后累加 · 整票按台阶 {{ 0.5 }} kg 向上进位一次</span>
   </form>
   <pre id="weights-out" class="out">待计算</pre>
 </section>
@@ -23,15 +23,17 @@
   {% if lines %}
   <table class="grid">
     <thead>
-      <tr><th>运单号</th><th class="num">实重 kg</th><th class="num">体积重 kg</th>
-        <th>来源</th><th class="num">计费重 kg</th><th class="num">段数</th><th>版本</th><th>标记</th></tr>
+      <tr><th>运单号</th><th class="num">件数</th><th class="num">实重 kg</th><th class="num">体积重 kg</th>
+        <th class="num">取大累加 kg</th><th>来源</th><th class="num">计费重 kg</th><th class="num">段数</th><th>版本</th><th>标记</th></tr>
     </thead>
     <tbody>
       {% for row in lines %}
       <tr>
         <td class="mono">{{ row.waybill_no }}</td>
+        <td class="num">{{ row.pieces }}</td>
         <td class="num">{{ row.actual_kg|kg }}</td>
         <td class="num">{{ row.volumetric_kg|kg }}</td>
+        <td class="num">{{ row.chargeable_kg|kg }}</td>
         <td>{{ labels.get(row.source, row.source) }}</td>
         <td class="num strong">{{ row.billable_kg|kg }}</td>
         <td class="num">{{ row.steps }}</td>
@@ -43,6 +45,36 @@
   </table>
   {% else %}
   <p class="empty">还没有计费重。</p>
+  {% endif %}
+</section>
+
+<div class="rule-line">{{ rule(200) }}</div>
+
+<section class="block">
+  <h2>逐件明细</h2>
+  {% if pieces %}
+  <table class="grid">
+    <thead>
+      <tr><th class="num">行</th><th>运单号</th><th class="num">件号</th><th class="num">实重 kg</th>
+        <th class="num">体积重 kg</th><th>来源</th><th class="num">取大值 kg</th><th>标记</th></tr>
+    </thead>
+    <tbody>
+      {% for row in pieces %}
+      <tr>
+        <td class="num">{{ row.line_no }}</td>
+        <td class="mono">{{ row.waybill_no }}</td>
+        <td class="num">{{ row.piece_seq }}</td>
+        <td class="num">{{ row.actual_kg|kg }}</td>
+        <td class="num">{{ row.volumetric_kg|kg }}</td>
+        <td>{{ labels.get(row.source, row.source) }}</td>
+        <td class="num strong">{{ row.chargeable_kg|kg }}</td>
+        <td class="mono dim">{{ row.codes }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">还没有逐件明细。</p>
   {% endif %}
 </section>
 {% endblock %}

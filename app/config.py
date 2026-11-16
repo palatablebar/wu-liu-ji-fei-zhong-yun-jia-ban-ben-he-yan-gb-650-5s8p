@@ -17,7 +17,7 @@ SAMPLE_DIR = Path(os.environ.get("FREIGHTRATE_SAMPLE") or PROJECT_DIR / "sample_
 DATA_DIR = Path(os.environ.get("FREIGHTRATE_DATA") or PROJECT_DIR / "data")
 DB_PATH = Path(os.environ.get("FREIGHTRATE_DB") or DATA_DIR / "freightrate.db")
 
-RULES_VERSION = os.environ.get("FREIGHTRATE_RULES") or "fr-2026.11.15-b1"
+RULES_VERSION = os.environ.get("FREIGHTRATE_RULES") or "fr-2026.11.16-b2"
 PROFILE = "step-500g"
 
 # 编码回退链：先按 BOM 感知的 UTF-8，再裸 UTF-8，最后 GB18030

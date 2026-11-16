@@ -1,7 +1,7 @@
 # 深度登记 freightrate 物流计费重与运价版本核验
 
 - 规模：中型（7 个功能模块，74-80 文件区间）
-- 核心规则：按提货时刻在运价版本半开区间内择版，计费重取实重与体积重的较大值再按台阶向上进位，分区价与附加费按固定顺序叠算，分项之和必须等于应收
+- 核心规则：按提货时刻在运价版本半开区间内择版，逐件取实重与体积重的较大值后累加、整票按台阶向上进位一次，分区价与附加费按固定顺序叠算，分项之和必须等于应收
 - 使用者与工作流：3PL 结算组每天收 3 家承运商的运单与月度运价表，先采信运单，再逐票算计费重与应收，最后与承运商账单对账并导出
 
 ## 功能模块
@@ -26,9 +26,10 @@
 | TRAP-07 | 重量写成 - 或 N/A | 当成 0 参与合计，运费凭空少一票 | 哨兵清单集中定义，三态分开，哨兵行进隔离区 | `app/modules/m3_quality/rules.py` | `tests/test_m3_quality.py` |
 | TRAP-10 | 20 票各分项用 float 累加 | 合计差 0.01 到 0.10，对账永远不平 | 全程 Decimal，分项先量化到分再求和 | `app/modules/m5_charges/money.py` | `tests/test_m5_charges.py` |
 | TRAP-11 | 提货时间一处写 Z 一处写 +08:00 | 同一时刻落进两个版本窗口 | 先归一到 UTC 再择版，写法混用标 TZ_MIXED | `app/modules/m1_waybill/normalize.py` | `tests/test_m2_rates.py` |
-| TRAP-14 | 同一运单号出现两次，重量不同 | 后写覆盖先写，结果取决于文件顺序 | 保留首条，后条按载荷是否一致分成 DUP_CONFLICT 与 DUPLICATE_WAYBILL | `app/modules/m3_quality/rules.py` | `tests/test_m3_quality.py` |
+| TRAP-14 | 同一运单号出现多行：多件一票、重复导出、改单冲突混在一起 | 一律当重复丢弃，多件的逐件证据丢失，运费少算 | 票级字段一致且测量不同即多件，逐件保留编件号；完全一致记 DUPLICATE_WAYBILL；票级冲突记 DUP_CONFLICT；后两种只留首条 | `app/modules/m3_quality/rules.py` | `tests/test_m3_quality.py` `tests/test_multipiece.py` |
 | TRAP-15 | 重量用 g 与 kg，尺寸用 cm 与 m | 直接按数字算，体积重差 1000 倍 | 单位表集中定义，先换算到 kg 与 cm 再算 | `app/modules/m1_waybill/normalize.py` | `tests/test_m1_waybill.py` |
 | TRAP-16 | 文件末尾是半行 | 半行被当成有效运单计费 | 末条列数不足记为 TRUNCATED_TAIL 并隔离 | `app/modules/m1_waybill/reader.py` | `tests/test_m1_waybill.py` |
+| TRAP-17 | 一票里一件实重偏高、另一件体积偏大 | 整票合并再比较，重件把抛件的体积重“吸收”掉，计费重与续重段数都少算 | 逐件各自取大后累加，整票一次进位、一次首重；逐件来源落 piece_lines 可追 | `app/modules/m4_weights/service.py` | `tests/test_multipiece.py` |
 | TRAP-23 | 提货时刻恰好等于版本生效起点或终点 | 两端都算，同一票落进两个版本 | 半开区间 [生效起, 生效止)，终点归到下一版 | `app/modules/m2_rates/version.py` | `tests/test_m2_rates.py` |
 | TRAP-24 | 各分项各自四舍五入 | 分项之和与应收差一分钱 | 分项先量化到分，应收由分项求和得出 | `app/modules/m5_charges/money.py` | `tests/test_m5_charges.py` |
 | TRAP-25 | 同分区两版生效区间相交 | 取到哪版看运气，同一票时高时低 | 先检测重叠，重叠即整份运价集拒绝装载 | `app/modules/m2_rates/version.py` | `tests/test_m2_rates.py` |
@@ -36,15 +37,15 @@
 
 ## 对账规则
 
-- 运单行账：采信记录 = 计费 + 隔离（有未计费行时单列第三项）
+- 运单行账：采信记录 = 计费 + 隔离（有未计费行时单列第三项），按逐件行计
 - 金额账：应收合计 = 基础运费 + 续重运费 + 偏远附加 + 燃油附加 + 保价费（Decimal，分）
-- 版本账：可计费运单 = 单选命中 + 无命中或重叠
-- 计费重账：计费行数 = 实重择用 + 体积重择用
-- 重跑：同一份输入得到同一个 run_id，行数与合计不变
+- 版本账：可计费运单 = 单选命中 + 无命中或重叠，按票计，多件不重复计票
+- 计费重账：计费件数 = 实重择用 + 体积重择用，按件计，逐件来源分类必须闭合
+- 重跑：同一份输入得到同一个 run_id，行数、逐件明细与合计都不变
 
 ## 已知不覆盖
 
 - 不做承运商账单文件的二次导入对账，本项目只核验自家计费结果是否四账相等
 - 不处理多币种换算，运价表 currency 固定 CNY，只做展示
-- 体积重只支持单一除数，不支持按件拆分后逐件取整
+- 体积重只支持单一除数（按服务），不支持同一票内按件指定不同除数
 - 不支持按票拆分多段运输（一票多分区），分区按整票一个值处理

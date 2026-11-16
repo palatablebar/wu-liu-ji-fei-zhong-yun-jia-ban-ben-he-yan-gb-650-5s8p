@@ -29,14 +29,14 @@ def test_min_charge_topup_applied():
 
 
 def test_wb_1001_matches_hand_calculation(pipeline):
-    """TRAP-10：分项用 Decimal，合计必须精确等于 42.67。"""
+    """TRAP-10：分项用 Decimal；两件一票首重只收一次，合计精确等于 62.42。"""
     line = _lines(pipeline["run_id"])["WB-1001"]
     assert line["base_amount"] == "13.00"
-    assert line["step_amount"] == "20.80"
+    assert line["step_amount"] == "39.00"
     assert line["remote_amount"] == "0.00"
-    assert line["fuel_amount"] == "2.87"
+    assert line["fuel_amount"] == "4.42"
     assert line["insurance_amount"] == "6.00"
-    assert line["total_amount"] == "42.67"
+    assert line["total_amount"] == "62.42"
 
 
 def test_wb_1002_min_charge_reaches_floor(pipeline):

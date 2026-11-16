@@ -17,7 +17,7 @@ _TMP = Path(tempfile.mkdtemp(prefix="gb650-tests-"))
 os.environ["FREIGHTRATE_DATA"] = str(_TMP)
 os.environ["FREIGHTRATE_DB"] = str(_TMP / "test.db")
 os.environ["FREIGHTRATE_SAMPLE"] = str(ROOT / "sample_data")
-os.environ["FREIGHTRATE_RULES"] = "fr-2026.11.15-b1"
+os.environ["FREIGHTRATE_RULES"] = "fr-2026.11.16-b2"
 os.environ["TZ"] = "Asia/Shanghai"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
